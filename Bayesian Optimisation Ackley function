@@ -1,0 +1,169 @@
+# Packages
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+#Ackley objective function
+def ackley_function(x, y, a=20, b=0.2, c=2 * np.pi):
+    d = 2
+    return -a*np.exp(-b*np.sqrt((1/d)*(x**2+y**2)))\
+           -np.exp((1/d)*(np.cos(c*x)+np.cos(c*y)))\
+           + a+np.exp(1)
+
+# Create grid
+x=np.linspace(-32.768, 32.768, 400)
+y=np.linspace(-32.768, 32.768, 400)
+X,Y = np.meshgrid(x, y)
+
+# z values for Ackley
+Z=ackley_function(X,Y)
+
+# Plot
+fig=plt.figure(figsize=(10,8))
+ax=fig.add_subplot(111, projection='3d')
+
+# Plot the surface
+surf=ax.plot_surface(X,Y,Z,cmap='cubehelix',edgecolor='black',linewidth=0.1)
+
+# Labels
+
+
+ax.set_xticks(np.arange(-30, 35, 10))  # Evenly spaced ticks for x-axis
+ax.set_yticks(np.arange(-30, 35, 10))  # Evenly spaced ticks for y-axis
+ax.set_zticks(np.arange(0, 25, 5))     # Evenly spaced ticks for z-axis
+
+ax.set_xlabel('x',fontsize=10,fontfamily='serif')
+ax.set_ylabel('y',fontsize=10,fontfamily='serif')
+ax.set_zlabel('z', fontsize=10, fontfamily='serif', labelpad=15)  #sibility
+ax.set_title('Ackley Function in 3D',fontsize=14,fontfamily='serif')
+
+plt.tight_layout()
+plt.show()
+
+
+
+##################BAYESIAN opt
+#Bayesian Optimisation for the Ackley function: Regression
+#Generate data points for the function
+#Train Gaussian regression
+#predict values over the domain for the GP
+
+# Packages
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
+
+# Objective function: Ackley
+def ackley_function(x, y=0, a=20, b=0.2, c=2 * np.pi):
+    d = 2
+    return -a*np.exp(-b*np.sqrt((1/d)*(x**2+y**2)))\
+           -np.exp((1/d)*(np.cos(c*x)+np.cos(c*y)))\
+           +a+np.exp(1)
+
+# sample data points
+np.random.seed(10)
+x_train=np.linspace(-32.768, 32.768, 20).reshape(-1, 1)
+y_train=ackley_function(x_train.flatten())
+
+# Define GP kernel with Radial basis function- squared exponential
+kernel=C(1.0,(1e-3,1e3))*RBF(length_scale=10.0,length_scale_bounds=(1e-2,1e2))
+gp=GaussianProcessRegressor(kernel=kernel,n_restarts_optimizer=10)
+
+# Fitting
+gp.fit(x_train, y_train)
+predictionsx_pred = np.linspace(-32.768, 32.768, 400).reshape(-1, 1)
+x_pred = np.linspace(-32.768, 32.768, 400).reshape(-1, 1)
+y_pred, sigma = gp.predict(x_pred, return_std=True)
+
+from scipy.stats import norm
+max_iterations=10
+def expected_improvement(x, gp, y_best, xi=0.01):
+    mean, std = gp.predict(x, return_std=True)
+    z = (mean - y_best - xi) / std
+    ei = (mean - y_best - xi) * norm.cdf(z) + std * norm.pdf(z)
+    return ei
+
+from scipy.optimize import minimize
+# Optimize the acquisition function
+def optimize_acquisition_function(acquisition_function, gp, y_best, bounds, xi=0.01):
+    """
+    Find the next point to evaluate using the acquisition function.
+
+    Parameters:
+    - acquisition_function: The acquisition function to optimize.
+    - gp: Trained GaussianProcessRegressor.
+    - y_best: The current best objective function value.
+    - bounds: Tuple specifying the bounds of the search space.
+    - xi: Exploration-exploitation tradeoff parameter.
+
+    Returns:
+    - x_next: The next x value to evaluate.
+    """
+    def negative_acquisition(x):
+        """Negate the acquisition function for minimization."""
+        return -acquisition_function(x.reshape(1, -1), gp, y_best, xi)
+
+    # Initial guess
+    x_initial = np.random.uniform(bounds[0], bounds[1], size=(1,)).flatten()
+
+    # Perform optimization
+    result = minimize(
+        negative_acquisition,
+        x_initial,
+        bounds=[bounds],
+        method="L-BFGS-B"
+    )
+
+    return result.x
+
+# Parameters for Bayesian Optimization
+bounds = (-32.768, 32.768)  # Bounds for the Ackley function
+max_iterations = 10  # Number of BO iterations
+xi = 0.01  # Exploration-exploitation tradeoff
+
+# Initialize BO
+x_train = np.linspace(-32.768, 32.768, 5).reshape(-1, 1)
+y_train = ackley_function(x_train.flatten())
+
+for iteration in range(max_iterations):
+    # Train the GP model
+    gp.fit(x_train, y_train)
+
+    # Find the next point using the acquisition function
+    y_best = y_train.min()
+    x_next = optimize_acquisition_function(expected_improvement, gp, y_best, bounds, xi)
+
+    # Evaluate the objective function at the new point
+    y_next = ackley_function(x_next)
+
+    # Add the new data point to the training set
+    x_train = np.vstack((x_train, x_next))
+    y_train = np.append(y_train, y_next)
+
+    print(f"Iteration {iteration + 1}: x_next = {x_next}, y_next = {y_next}")
+
+# Final GP predictions
+x_pred = np.linspace(-32.768, 32.768, 400).reshape(-1, 1)
+y_pred, sigma = gp.predict(x_pred, return_std=True)
+
+#Plot of results
+plt.figure(figsize=(10, 7))
+# Plot the true Ackley function for y = 0
+plt.plot(x_pred, ackley_function(x_pred.flatten()), color='tomato', lw=2, label='True Ackley Function (y=0)')
+# Plot the GP mean prediction
+plt.plot(x_pred, y_pred, color='royalblue', lw=2, label='GP Mean Prediction')
+plt.fill_between(x_pred.flatten(),
+                 y_pred - sigma,
+                 y_pred + sigma,
+                 alpha=0.68,
+                 color='powderblue',
+                 label='Confidence Interval (±1σ)')
+plt.scatter(x_train, y_train, color='black', s=50, zorder=10, label='Training Points', marker='x')
+plt.xlabel('x', fontsize=12, fontfamily='serif', color='darkblue')
+plt.ylabel('y', fontsize=12, fontfamily='serif', color='darkblue')
+plt.title('Bayesian Optimisation of Ackley Function', fontsize=13, fontfamily='serif', color='black')
+plt.grid(True, linestyle='--', linewidth=0.5, alpha=0.7, color='gray')
+plt.legend(facecolor='ivory', edgecolor='black', fontsize=10)
+plt.tight_layout()
+plt.show()
